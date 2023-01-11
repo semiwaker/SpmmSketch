@@ -6,3 +6,5 @@ record.txt
 data/*
 *.png
 test.py
+spmmSketch/hls/spgemm
+spmmSketch/hls/vitis_hls.log
