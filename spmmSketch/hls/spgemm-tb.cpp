@@ -2,12 +2,12 @@
 #include <vector>
 #include <cstring>
 
+int matA[MAX_LENGTH][K], matB[K][MAX_LENGTH];
+int mat_final[MAX_LENGTH][MAX_LENGTH], mat_ref[MAX_LENGTH][MAX_LENGTH];
+
 int main() {
 	std::vector<MAT_PKT_T> lhs, rhs;
 	COO_STREAM_T rst[NUM_PE];
-
-	int matA[MAX_LENGTH][K], matB[K][MAX_LENGTH];
-	int mat_final[MAX_LENGTH][MAX_LENGTH], mat_ref[MAX_LENGTH][MAX_LENGTH];
 
 	memset(matA, 0, sizeof(matA));
 	memset(matB, 0, sizeof(matB));

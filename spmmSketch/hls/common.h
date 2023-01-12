@@ -1,10 +1,10 @@
 #pragma once
 
 #include <ap_int.h>
-#include <hls_math.h>
 #include <hls_stream.h>
 #include <limits.h>
 #include <assert.h>
+#include <math.h>
 
 const int NUM_NNZ = 10;
 const int MAX_LENGTH=1024;

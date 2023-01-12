@@ -68,7 +68,6 @@ void PE(IDX_VAL_STREAM_T &lhs_stream, IDX_VAL_STREAM_T &rhs_stream, COO_STREAM_T
 
 	for (int k=0; k < K/NUM_PE; k++) {
 		IDX_VAL_T lhs_buff[BUFF_SIZE], rhs_buff[BUFF_SIZE];
-#pragma HLS DATAFLOW
 		const unsigned num_lhs_this_col = lhs_stream.read().val;
 		const unsigned num_rhs_this_row = rhs_stream.read().val;
 #ifndef __SYNTHESIS__
@@ -321,20 +320,22 @@ inline unsigned own_hash(const unsigned row, const unsigned col, const int m=0) 
 //				if (new_coo.row == 918 && new_coo.col == 918) {
 //					printf("found=%d, ram[%d][%d] = {918, 918, %d}\n", found, sel, selH, new_coo.val);
 //				}
-			} else {
-				// release all data
-				for (int m=0; m<M; m++) {
-					for (int h=0; h<N; h++) {
-#pragma HLS PIPELINE II=1
-						COO_T coo = ram[m][h];
-						if (coo != EMPTY_COO) {
-							dest.write(coo);
-						}
-					}
-				}
-				dest.write(END_COO);
 			}
 		}
+
+		// release all data
+		for (int m=0; m<M; m++) {
+			for (int h=0; h<N; h++) {
+#pragma HLS PIPELINE II=1
+				COO_T coo = ram[m][h];
+				if (coo != EMPTY_COO) {
+					dest.write(coo);
+				}
+			}
+		}
+		dest.write(END_COO);
+
+
 	}
 //};
 
@@ -353,10 +354,11 @@ void arbiter_1p(
 	fflush(stdout);
 #endif
 
-    #pragma HLS pipeline II=1 style=flp
+   #pragma HLS pipeline II=1 style=flp
+// #pragma HLS PIPELINE II=1 //enable_flush
     #pragma HLS latency min=ARBITER_LATENCY max=ARBITER_LATENCY
 
-    #pragma HLS array_partition variable=xbar_sel complete
+//    #pragma HLS array_partition variable=xbar_sel complete
 
     // prioritized valid and addr
     ap_uint<num_lanes> arb_p_in_valid = in_valid;
@@ -364,8 +366,6 @@ void arbiter_1p(
     IDX_T in_addr[num_lanes];
 #pragma HLS array_partition variable=arb_p_in_addr complete
 #pragma HLS array_partition variable=in_addr complete
-    #pragma HLS array_partition variable=in_addr complete
-    #pragma HLS array_partition variable=arb_p_in_addr complete
 
     for (unsigned i = 0; i < num_lanes; i++) {
         #pragma HLS unroll
@@ -444,8 +444,9 @@ void shuffle_core(COO_STREAM_T input_lanes[2], COO_STREAM_T output_lanes[2], uns
 
 	// arbiter outputs
 	unsigned xbar_sel[num_lanes];
+#pragma HLS array_partition variable=xbar_sel complete
+
 	ap_uint<num_lanes> xbar_valid = 0;
-	#pragma HLS array_partition variable=xbar_sel complete
 	// arbiter priority rotation
 	unsigned rotate_priority = 0;
 	unsigned next_rotate_priority = 0;
@@ -610,8 +611,9 @@ void collector(COO_STREAM_T &src, COO_STREAM_T &dest, bool debug=0);
 //public:
 //	COO_STREAM_T in[2], out[2];
 //	void apply(COO_STREAM_T &dest0, COO_STREAM_T &dest1, unsigned ref_bit, const int level, const int id) {
+
 	void shuffle_unit(COO_STREAM_T in[2], COO_STREAM_T out[2], COO_STREAM_T &dest0, COO_STREAM_T &dest1, unsigned ref_bit, const int level, const int id) {
-#pragma HLS INLINE off
+#pragma HLS INLINE
 #ifndef __SYNTHESIS__
 	printf("Shuffler[%d][%d].apply(ref_bit=%u)\n", level, id, ref_bit);
 	fflush(stdout);
@@ -680,7 +682,9 @@ void spgemm(MAT_PKT_T *lhs, MAT_PKT_T *rhs,
 #pragma HLS interface s_axilite bundle=control port=return
 
 	IDX_VAL_STREAM_T LHS2PE[NUM_PE];
+#pragma HLS STREAM variable=LHS2PE depth=D
 	IDX_VAL_STREAM_T RHS2PE[NUM_PE];
+#pragma HLS STREAM variable=RHS2PE depth=D
 
 
 //	HashTable hashes[NUM_HASH_LEVEL][NUM_PE];
@@ -695,7 +699,7 @@ void spgemm(MAT_PKT_T *lhs, MAT_PKT_T *rhs,
 
 	COO_STREAM_T shuffle_in[NUM_SHUFFLE_LEVEL][NUM_SHUFFLE_PER_LEVEL][2], shuffle_out[NUM_SHUFFLE_LEVEL][NUM_SHUFFLE_PER_LEVEL][2];
 #pragma HLS STREAM variable=shuffle_in depth=D
-#pragma HLS STREAM variable=shuffle_in depth=D
+#pragma HLS STREAM variable=shuffle_out depth=D
 
 #pragma HLS DATAFLOW
 
