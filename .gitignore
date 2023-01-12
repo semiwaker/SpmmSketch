@@ -8,3 +8,6 @@ data/*
 test.py
 spmmSketch/hls/spgemm
 spmmSketch/hls/vitis_hls.log
+vitis_run/
+
+!vitis_run/run.tcl

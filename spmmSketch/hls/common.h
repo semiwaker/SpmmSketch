@@ -1,6 +1,7 @@
 #pragma once
 
 #include <ap_int.h>
+#include <hls_math.h>
 #include <hls_stream.h>
 #include <limits.h>
 #include <assert.h>
