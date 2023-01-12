@@ -5,6 +5,7 @@
 #include <limits.h>
 #include <assert.h>
 
+const int NUM_NNZ = 10;
 const int MAX_LENGTH=1024;
 const int HIGH_BIT=9; // log(MAX_LENGTH)
 const int K=128;
@@ -50,8 +51,8 @@ typedef struct {
 } IDX_VAL_T;
 
 typedef struct {
-	IDX_T col;
 	IDX_T row;
+	IDX_T col;
 	VAL_T val;
 } COO_T;
 
@@ -65,5 +66,7 @@ typedef hls::stream<IDX_VAL_T> IDX_VAL_STREAM_T;
 typedef hls::stream<COO_T> COO_STREAM_T;
 
 extern "C" {
-void spgemm(MAT_PKT_T *lhs, MAT_PKT_T *rhs,  COO_STREAM_T rst[NUM_PE]);
+void spgemm(MAT_PKT_T *lhs, MAT_PKT_T *rhs,
+		COO_STREAM_T &rst0, COO_STREAM_T &rst1, COO_STREAM_T &rst2, COO_STREAM_T &rst3,
+		COO_STREAM_T &rst4, COO_STREAM_T &rst5, COO_STREAM_T &rst6, COO_STREAM_T &rst7);
 }

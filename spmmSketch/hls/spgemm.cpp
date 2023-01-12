@@ -10,7 +10,7 @@ bool operator !=(const COO_T &a, const COO_T &b) {
 template<typename T, unsigned len>
 T array_max(T array[len]) {
     #pragma HLS inline
-    #pragma HLS expression_balance
+//    #pragma HLS expression_balance
     T result = 0;
     for (unsigned i = 0; i < len; i++) {
         #pragma HLS unroll
@@ -71,6 +71,9 @@ void PE(IDX_VAL_STREAM_T &lhs_stream, IDX_VAL_STREAM_T &rhs_stream, COO_STREAM_T
 #pragma HLS DATAFLOW
 		const unsigned num_lhs_this_col = lhs_stream.read().val;
 		const unsigned num_rhs_this_row = rhs_stream.read().val;
+#ifndef __SYNTHESIS__
+//		printf("PE, k=%d, #lhs=%u, #rhs=%u\n", k, num_lhs_this_col, num_rhs_this_row);
+#endif
 		for (int i=0; i<num_lhs_this_col; i++)
 			lhs_buff[i] = lhs_stream.read();
 		for (int i=0; i<num_rhs_this_row; i++)
@@ -83,6 +86,9 @@ void PE(IDX_VAL_STREAM_T &lhs_stream, IDX_VAL_STREAM_T &rhs_stream, COO_STREAM_T
 				IDX_VAL_T lhs = lhs_buff[i], rhs = rhs_buff[j];
 				COO_T rst{lhs.idx, rhs.idx, lhs.val * rhs.val};
 				dest.write(rst);
+//				if (rst.row == 918 && rst.col == 918) {
+//					printf("\t{%u, %u, %d}\n", 918, 918, rst.val);
+//				}
 			}
 		}
 	}
@@ -106,7 +112,7 @@ inline void hashlookup3_core(ap_uint<W> key_val, ap_uint<64>& hash_val) {
     ap_uint<64> hash2 = 2818135537; // 0xA7F955F1
 
     // loop value 32 bit
-    uint32_t a, b, c;
+    unsigned a, b, c;
     a = b = c = c1 + ((ap_uint<32>)key8blen) + ((ap_uint<32>)hash1);
     c += (ap_uint<32>)hash2;
 
@@ -238,15 +244,18 @@ inline unsigned own_hash(const unsigned row, const unsigned col, const int m=0) 
 
 }
 
-class HashTable {
-public:
-	COO_STREAM_T in, out;
-#pragma HLS STREAM variable=in depth=D
-#pragma HLS STREAM variable=in depth=D
-	COO_T ram[M][N];
-#pragma HLS ARRAY_PARTITION variable=ram dim=1 type=complete
+//class HashTable {
+//public:
+//	COO_STREAM_T in, out;
+//	COO_T ram[M][N];
+//
+//	HashTable() {
+//#pragma HLS STREAM variable=in depth=D
+//#pragma HLS STREAM variable=out depth=D
+//#pragma HLS ARRAY_PARTITION variable=ram dim=1 type=complete
+//	}
 
-	void initialize() {
+	void initialize(COO_T ram[M][N]) {
 		for (int m=0; m<M; m++) {
 #pragma HLS UNROLL
 			for (int n=0; n<N; n++) {
@@ -256,15 +265,15 @@ public:
 		}
 	}
 
-	void apply(COO_STREAM_T &dest, const int level, const int id) {
+//	void apply(COO_STREAM_T &dest, const int level, const int id) {
+
+	void hash_table(COO_T ram[M][N], COO_STREAM_T &in, COO_STREAM_T &dest, const int level, const int id) {
 #pragma HLS INLINE off
 #ifndef __SYNTHESIS__
 	printf("HashTable[%d][%d].apply()\n", level, id);
 	fflush(stdout);
 #endif
-
-
-		initialize();
+		initialize(ram);
 		bool exit = 0;
 		while (!exit) {
 #pragma HLS PIPELINE II=1
@@ -275,11 +284,13 @@ public:
 				unsigned col = coo.col;
 				int val = coo.val;
 
-				bool drop = false, found=false;
-				int sel, selH;
+				bool drop = false;
+				bool found=false;
+				unsigned sel, selH;
 				COO_T dropped{(unsigned)-1, (unsigned)-1, INT_MAX};
 				unsigned hash_val = own_hash(row, col);
-				COO_T new_coo = (COO_T){row, col, val};
+				COO_T new_coo = coo;
+
 				for (int m=0; m<M; m++) {
 #pragma HLS UNROLL
 					COO_T old_coo = ram[m][hash_val];
@@ -288,7 +299,7 @@ public:
 							found = true;
 							sel = m;
 							selH = hash_val;
-						} else if (old_coo.col == col && old_coo.row == col) {
+						} else if (old_coo.row == row && old_coo.col == col) {
 							found = true;
 							sel = m;
 							selH = hash_val;
@@ -306,6 +317,10 @@ public:
 					dest.write(dropped);
 				}
 				ram[sel][selH] = new_coo;
+
+//				if (new_coo.row == 918 && new_coo.col == 918) {
+//					printf("found=%d, ram[%d][%d] = {918, 918, %d}\n", found, sel, selH, new_coo.val);
+//				}
 			} else {
 				// release all data
 				for (int m=0; m<M; m++) {
@@ -321,7 +336,7 @@ public:
 			}
 		}
 	}
-};
+//};
 
 void arbiter_1p(
     const COO_T in_pld[num_lanes],
@@ -333,16 +348,22 @@ void arbiter_1p(
     const unsigned rotate_priority,
 	const unsigned ref_bit
 ) {
-    #pragma HLS pipeline II=1 enable_flush
+#ifndef __SYNTHESIS__
+//	printf("\tarbiter start ... ");
+	fflush(stdout);
+#endif
+
+    #pragma HLS pipeline II=1 style=flp
     #pragma HLS latency min=ARBITER_LATENCY max=ARBITER_LATENCY
 
-    #pragma HLS array_partition variable=in_addr complete
     #pragma HLS array_partition variable=xbar_sel complete
 
     // prioritized valid and addr
     ap_uint<num_lanes> arb_p_in_valid = in_valid;
     IDX_T arb_p_in_addr[num_lanes];
     IDX_T in_addr[num_lanes];
+#pragma HLS array_partition variable=arb_p_in_addr complete
+#pragma HLS array_partition variable=in_addr complete
     #pragma HLS array_partition variable=in_addr complete
     #pragma HLS array_partition variable=arb_p_in_addr complete
 
@@ -381,16 +402,20 @@ void arbiter_1p(
     loop_A_grant:
     for (unsigned ILid = 0; ILid < num_lanes; ILid++) {
         #pragma HLS unroll
-        unsigned requested_olid = in_addr[ILid] % num_lanes;
+        unsigned requested_olid = (in_addr[ILid] >> ref_bit) & 1;
         bool in_granted = (in_valid[ILid]
                            && out_valid[requested_olid]
                            && (xbar_sel[requested_olid] == ILid));
         in_resend[ILid] = (in_valid[ILid] && !in_granted) ? 1 : 0;
         resend_pld[ILid] = in_pld[ILid];
     }
-
+#ifndef __SYNTHESIS__
+//	printf("done\n");
+	fflush(stdout);
+#endif
 }
 
+//#define DEBUG_SHUFFLE
 void shuffle_core(COO_STREAM_T input_lanes[2], COO_STREAM_T output_lanes[2], unsigned ref_bit) {
 #pragma HLS INLINE off
 	const unsigned shuffler_extra_iters = (ARBITER_LATENCY + 1) * num_lanes;
@@ -425,12 +450,17 @@ void shuffle_core(COO_STREAM_T input_lanes[2], COO_STREAM_T output_lanes[2], uns
 	unsigned rotate_priority = 0;
 	unsigned next_rotate_priority = 0;
 
-
+#ifndef __SYNTHESIS__
+	unsigned count = 0;
+#endif
 	loop_shuffle_pipeline:
 	while (!loop_exit) {
 		#pragma HLS pipeline II=1
 		#pragma HLS dependence variable=resend inter RAW true distance=6
 		#pragma HLS dependence variable=payload_resend inter RAW true distance=6
+#ifndef __SYNTHESIS__
+		count ++;
+#endif
 
 		for (unsigned ILid = 0; ILid < num_lanes; ILid++) {
 			#pragma HLS unroll
@@ -441,19 +471,69 @@ void shuffle_core(COO_STREAM_T input_lanes[2], COO_STREAM_T output_lanes[2], uns
 				valid[ILid] = 0;
 				payload[ILid] = END_COO;
 			} else {
+#ifndef __SYNTHESIS__
+#ifdef DEBUG_SHUFFLE
+					if (count <= 10000) {
+						printf("\t[Lane %d] Try a new payload\n", ILid);
+						fflush(stdout);
+					}
+#endif
+#endif
 				if (input_lanes[ILid].read_nb(payload[ILid])) {
+#ifndef __SYNTHESIS__
+#ifdef DEBUG_SHUFFLE
+					if (count <= 10000) {
+						printf("\t[Lane %d] Read a new payload", ILid);
+						fflush(stdout);
+					}
+#endif
+#endif
 					if (payload[ILid] == END_COO) {
 						fetch_complete[ILid] = 1;
 						valid[ILid] = 0;
+#ifndef __SYNTHESIS__
+#ifdef DEBUG_SHUFFLE
+						if (count <= 10000) {
+							printf(": END_COO\n");
+							fflush(stdout);
+						}
+#endif
+#endif
 					} else {
 						valid[ILid] = 1;
+#ifndef __SYNTHESIS__
+#ifdef DEBUG_SHUFFLE
+						if (count <= 10000) {
+							printf(": {%u, %u, %d}\n", payload[ILid].row, payload[ILid].col, payload[ILid].val);
+							fflush(stdout);
+						}
+#endif
+#endif
 					}
 				} else {
 					valid[ILid] = 0;
 					payload[ILid] = END_COO;
+#ifndef __SYNTHESIS__
+#ifdef DEBUG_SHUFFLE
+					if (count <= 10000) {
+						printf("\t[Lane %d] No payload\n", ILid);
+						fflush(stdout);
+					}
+#endif
+#endif
+
 				}
 			}
 		}
+#ifndef __SYNTHESIS__
+#ifdef DEBUG_SHUFFLE
+		if(count <= 10000) {
+			printf("\tvalid[0]=%d, valid[1]=%d\n",
+					(int)valid[0], (int)valid[1]);
+			fflush(stdout);
+		}
+#endif
+#endif
 		switch (state) {
 		case SF_WORKING:
 			if (fetch_complete.and_reduce()) {
@@ -488,11 +568,29 @@ void shuffle_core(COO_STREAM_T input_lanes[2], COO_STREAM_T output_lanes[2], uns
 			#pragma HLS unroll
 			if (xbar_valid[OLid]) {
 				if (valid[xbar_sel[OLid]]) {
+#ifndef __SYNTHESIS__
+#ifdef DEBUG_SHUFFLE
+		if(count <= 10000) {
+			printf("\toutput_lanes[%d].write(payload[%d])\n",OLid, xbar_sel[OLid]);
+			fflush(stdout);
+		}
+#endif
+#endif
 					output_lanes[OLid].write(payload[xbar_sel[OLid]]);
 				}
 			}
 		}
 		// ------- end of C stage
+
+#ifndef __SYNTHESIS__
+#ifdef DEBUG_SHUFFLE
+		if(count <= 10000) {
+			printf("\tLoop[%d]: loop_exit=%d, valid[0]=%d, valid[1]=%d, xbar_valid[0]=%d, xbar_valid[1]=%d, resend[0]=%d, resend[1]=%d\n",
+					count, loop_exit, (int)valid[0], (int)valid[1], (int)xbar_valid[0], (int)xbar_valid[1], (int)resend[0], (int)resend[1]);
+			fflush(stdout);
+		}
+#endif
+#endif
 
 	} // main while() loop ends here
 
@@ -500,17 +598,22 @@ void shuffle_core(COO_STREAM_T input_lanes[2], COO_STREAM_T output_lanes[2], uns
 		#pragma HLS unroll
 		output_lanes[OLid].write(END_COO);
 	}
+#ifndef __SYNTHESIS__
+	printf("shuffle-core done\n");
+	fflush(stdout);
+#endif
 }
 
-void collector(COO_STREAM_T &rst, COO_STREAM_T &pipe);
+void collector(COO_STREAM_T &src, COO_STREAM_T &dest, bool debug=0);
 
-class Shuffler {
-public:
-	COO_STREAM_T in[2], out[2];
-	void apply(COO_STREAM_T &dest0, COO_STREAM_T &dest1, unsigned ref_bit, const int level, const int id) {
+//class Shuffler {
+//public:
+//	COO_STREAM_T in[2], out[2];
+//	void apply(COO_STREAM_T &dest0, COO_STREAM_T &dest1, unsigned ref_bit, const int level, const int id) {
+	void shuffle_unit(COO_STREAM_T in[2], COO_STREAM_T out[2], COO_STREAM_T &dest0, COO_STREAM_T &dest1, unsigned ref_bit, const int level, const int id) {
 #pragma HLS INLINE off
 #ifndef __SYNTHESIS__
-	printf("Shuffler[%d[%d].apply()\n", level, id);
+	printf("Shuffler[%d][%d].apply(ref_bit=%u)\n", level, id, ref_bit);
 	fflush(stdout);
 #endif
 
@@ -519,72 +622,131 @@ public:
 		collector(out[0], dest0);
 		collector(out[1], dest1);
 	}
-};
+//};
 
 
-void collector(COO_STREAM_T &rst, COO_STREAM_T &pipe) {
+void collector(COO_STREAM_T &src, COO_STREAM_T &dest, bool debug) {
 	bool exit = false;
+#ifndef __SYNTHESIS__
+	int count = 0;
+#endif
 	while(!exit) {
 #pragma HLS PIPELINE II=1
-		COO_T coo = pipe.read();
+		COO_T coo = src.read();
 		exit = (coo == END_COO);
-		rst.write(coo);
+		dest.write(coo);
+#ifndef __SYNTHESIS__
+		count += 1;
+		if (debug) {
+			if (count < 20)
+				printf("\t{%u, %u, %d}\n", coo.row, coo.col, coo.val);
+		}
+#endif
 	}
+#ifndef __SYNTHESIS__
+	if (debug) {
+			printf("-----------------\n");
+	}
+#endif
 }
 
 inline unsigned get_shuffle(int idx, int x) {
 	return ((idx >> (x+1)) << x) | (idx & ((1<<x) - 1));
 }
 inline unsigned get_shuffle_channel(int idx, int x) {
-	return (idx & (1 << (x-1)));
+	return (idx >> (x)) & 1;
 }
 
 extern "C" {
 
-void spgemm(MAT_PKT_T *lhs, MAT_PKT_T *rhs,  COO_STREAM_T rst[NUM_PE]) {
+void spgemm(MAT_PKT_T *lhs, MAT_PKT_T *rhs,
+		COO_STREAM_T &rst0, COO_STREAM_T &rst1, COO_STREAM_T &rst2, COO_STREAM_T &rst3,
+		COO_STREAM_T &rst4, COO_STREAM_T &rst5, COO_STREAM_T &rst6, COO_STREAM_T &rst7) {
 
 #pragma HLS interface m_axi offset=slave bundle=gmem0 port=lhs max_read_burst_length=64 num_read_outstanding=64 depth=MAX_LENGTH*K
 #pragma HLS interface s_axilite bundle=control port=lhs
 #pragma HLS interface m_axi offset=slave bundle=gmem1 port=rhs max_read_burst_length=64 num_read_outstanding=64 depth=MAX_LENGTH*K
 #pragma HLS interface s_axilite bundle=control port=rhs
-#pragma HLS interface axis port=rst
+
+#pragma HLS interface axis port=rst0
+#pragma HLS interface axis port=rst1
+#pragma HLS interface axis port=rst2
+#pragma HLS interface axis port=rst3
+#pragma HLS interface axis port=rst4
+#pragma HLS interface axis port=rst5
+#pragma HLS interface axis port=rst6
+#pragma HLS interface axis port=rst7
+
+#pragma HLS interface s_axilite bundle=control port=return
 
 	IDX_VAL_STREAM_T LHS2PE[NUM_PE];
 	IDX_VAL_STREAM_T RHS2PE[NUM_PE];
 
-	HashTable hashes[NUM_HASH_LEVEL][NUM_PE];
-	Shuffler shuffles[NUM_SHUFFLE_LEVEL][NUM_SHUFFLE_PER_LEVEL];
+
+//	HashTable hashes[NUM_HASH_LEVEL][NUM_PE];
+//	Shuffler shuffles[NUM_SHUFFLE_LEVEL][NUM_SHUFFLE_PER_LEVEL];
+
+	COO_STREAM_T hash_in[NUM_HASH_LEVEL][NUM_PE]; // , hash_out[NUM_HASH_LEVEL][NUM_PE];
+	COO_T hash_ram[NUM_HASH_LEVEL][NUM_PE][M][N];
+#pragma HLS STREAM variable=hash_in depth=D
+#pragma HLS ARRAY_PARTITION variable=hash_ram dim=1 type=complete
+#pragma HLS ARRAY_PARTITION variable=hash_ram dim=2 type=complete
+#pragma HLS ARRAY_PARTITION variable=hash_ram dim=3 type=complete
+
+	COO_STREAM_T shuffle_in[NUM_SHUFFLE_LEVEL][NUM_SHUFFLE_PER_LEVEL][2], shuffle_out[NUM_SHUFFLE_LEVEL][NUM_SHUFFLE_PER_LEVEL][2];
+#pragma HLS STREAM variable=shuffle_in depth=D
+#pragma HLS STREAM variable=shuffle_in depth=D
+
+#pragma HLS DATAFLOW
 
 	loader<LHS>(lhs, LHS2PE);
 	loader<RHS>(rhs, RHS2PE);
 
-#pragma HLS DATAFLOW
-
 	for (int i=0; i<NUM_PE; i++)
 #pragma HLS UNROLL
-		PE(LHS2PE[i], RHS2PE[i], hashes[0][i].in);
+		PE(LHS2PE[i], RHS2PE[i], hash_in[0][i]);
 
 	for (int i=0; i<NUM_HASH_LEVEL-1; i++) {
 #pragma HLS UNROLL
 		for (int j=0; j<NUM_PE; j++) {
 #pragma HLS UNROLL
-			hashes[i][j].apply(shuffles[i][get_shuffle(j, i)].in[get_shuffle_channel(j, i)], i, j);
+#ifndef __SYNTHESIS__
+			printf("hashes[%d][%d] sends to shuffles[%d][%d].in[%d]\n", i, j, i, get_shuffle(j,i), get_shuffle_channel(j,i));
+#endif
+//			hashes[i][j].apply(shuffles[i][get_shuffle(j, i)].in[get_shuffle_channel(j, i)], i, j);
+			hash_table(hash_ram[i][j], hash_in[i][j], shuffle_in[i][get_shuffle(j, i)][get_shuffle_channel(j, i)], i, j);
 		}
 		for (int j=0; j<NUM_SHUFFLE_PER_LEVEL; j++) {
 #pragma HLS UNROLL
-			shuffles[i][j].apply(hashes[i+1][j*2].in, hashes[i+1][j*2+1].in, MAX_LENGTH-j, i, j);
+//			shuffles[i][j].apply(hashes[i+1][j*2].in, hashes[i+1][j*2+1].in, HIGH_BIT-i, i, j);
+			shuffle_unit(shuffle_in[i][j], shuffle_out[i][j], hash_in[i+1][j*2], hash_in[i+1][j*2+1], HIGH_BIT-i, i, j);
 		}
 	}
 
+//#ifndef __SYNTHESIS__
+//	printf("Start collectors\n");
+//	fflush(stdout);
+//#endif
+
+#define LAST_HASH(j, rstj) hash_table(hash_ram[NUM_HASH_LEVEL-1][j], hash_in[NUM_HASH_LEVEL-1][j], rstj, NUM_HASH_LEVEL-1, j);
+	LAST_HASH(0, rst0);
+	LAST_HASH(1, rst1);
+	LAST_HASH(2, rst2);
+	LAST_HASH(3, rst3);
+	LAST_HASH(4, rst4);
+	LAST_HASH(5, rst5);
+	LAST_HASH(6, rst6);
+	LAST_HASH(7, rst7);
+//	for (int j=0; j<NUM_PE; j++) {
+//#pragma HLS UNROLL
+////		hashes[NUM_HASH_LEVEL-1][j].apply(rst[j], NUM_HASH_LEVEL-1, j);
+//		hash_table(hash_ram[NUM_HASH_LEVEL-1][j], hash_in[NUM_HASH_LEVEL-1][j], rst[j], NUM_HASH_LEVEL-1, j);
+//	}
+
 #ifndef __SYNTHESIS__
-	printf("Start collectors\n");
+	printf("SpGEMM done\n");
 	fflush(stdout);
 #endif
-
-	for (int j=0; j<NUM_PE; j++) {
-#pragma HLS UNROLL
-		collector(rst[j], hashes[NUM_HASH_LEVEL-1][j].out);
-	}
 }
 
 }
