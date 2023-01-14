@@ -27,6 +27,7 @@ const int D=16;
 
 const int THRESHOLD=150;
 
+const unsigned SHUFFLE_DISTANCE = 9;
 const unsigned ARBITER_LATENCY = 5;
 const unsigned num_lanes = 2;
 

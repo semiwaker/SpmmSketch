@@ -276,6 +276,8 @@ inline unsigned own_hash(const unsigned row, const unsigned col, const int m=0) 
 		bool exit = 0;
 		while (!exit) {
 #pragma HLS PIPELINE II=1
+#pragma HLS DEPENDENCE variable=ram RAW inter false
+
 			COO_T coo = in.read();
 			exit = (coo == END_COO);
 			if (coo != END_COO) {
@@ -457,8 +459,8 @@ void shuffle_core(COO_STREAM_T input_lanes[2], COO_STREAM_T output_lanes[2], uns
 	loop_shuffle_pipeline:
 	while (!loop_exit) {
 		#pragma HLS pipeline II=1
-		#pragma HLS dependence variable=resend inter RAW true distance=6
-		#pragma HLS dependence variable=payload_resend inter RAW true distance=6
+		#pragma HLS dependence variable=resend inter RAW true distance=ARBITER_LATENCY
+		#pragma HLS dependence variable=payload_resend inter RAW true distance=ARBITER_LATENCY
 #ifndef __SYNTHESIS__
 		count ++;
 #endif
