@@ -64,6 +64,7 @@ const COO_T END_COO{(unsigned)-1,(unsigned)-1,-1};
 bool operator ==(const COO_T &a, const COO_T &b);
 bool operator !=(const COO_T &a, const COO_T &b);
 
+typedef hls::stream<ap_uint<1>> FLAG_STREAM_T;
 typedef hls::stream<IDX_VAL_T> IDX_VAL_STREAM_T;
 typedef hls::stream<COO_T> COO_STREAM_T;
 

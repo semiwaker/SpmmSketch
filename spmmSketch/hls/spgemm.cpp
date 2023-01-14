@@ -343,9 +343,9 @@ inline unsigned own_hash(const unsigned row, const unsigned col, const int m=0) 
 
 void arbiter_1p(
     const COO_T in_pld[num_lanes],
-    COO_T resend_pld[num_lanes],
+    COO_T resend_pld[num_lanes][ARBITER_LATENCY],
     const ap_uint<num_lanes> in_valid,
-    ap_uint<1> in_resend[num_lanes],
+    ap_uint<1> in_resend[num_lanes][ARBITER_LATENCY],
     unsigned xbar_sel[num_lanes],
     ap_uint<num_lanes> &out_valid,
     const unsigned rotate_priority,
@@ -408,8 +408,8 @@ void arbiter_1p(
         bool in_granted = (in_valid[ILid]
                            && out_valid[requested_olid]
                            && (xbar_sel[requested_olid] == ILid));
-        in_resend[ILid] = (in_valid[ILid] && !in_granted) ? 1 : 0;
-        resend_pld[ILid] = in_pld[ILid];
+        in_resend[ILid][0] = (in_valid[ILid] && !in_granted) ? 1 : 0;
+        resend_pld[ILid][0] = in_pld[ILid];
     }
 #ifndef __SYNTHESIS__
 //	printf("done\n");
@@ -433,15 +433,19 @@ void shuffle_core(COO_STREAM_T input_lanes[2], COO_STREAM_T output_lanes[2], uns
 	ap_uint<num_lanes> valid = 0;
 
 	// resend control
-	COO_T payload_resend[num_lanes];
+	COO_T payload_resend[num_lanes][ARBITER_LATENCY];
 	#pragma HLS array_partition variable=payload_resend complete
 
-	ap_uint<1> resend[num_lanes];
+	ap_uint<1> resend[num_lanes][ARBITER_LATENCY];
 	#pragma HLS array_partition variable=resend complete
 
-	for (unsigned i = 0; i < num_lanes; i++) {
-		#pragma HLS unroll
-		resend[i] = 0;
+	for (unsigned j = 0; j < ARBITER_LATENCY; ++j) {
+	#pragma HLS unroll
+		for (unsigned i = 0; i < num_lanes; i++) {
+			#pragma HLS unroll
+			resend[i][j] = 0;
+			payload_resend[i][j] = EMPTY_COO;
+		}
 	}
 
 	// arbiter outputs
@@ -459,17 +463,17 @@ void shuffle_core(COO_STREAM_T input_lanes[2], COO_STREAM_T output_lanes[2], uns
 	loop_shuffle_pipeline:
 	while (!loop_exit) {
 		#pragma HLS pipeline II=1
-		#pragma HLS dependence variable=resend inter RAW true distance=ARBITER_LATENCY
-		#pragma HLS dependence variable=payload_resend inter RAW true distance=ARBITER_LATENCY
+		#pragma HLS dependence variable=resend inter RAW false
+		#pragma HLS dependence variable=payload_resend inter RAW false
 #ifndef __SYNTHESIS__
 		count ++;
 #endif
 
 		for (unsigned ILid = 0; ILid < num_lanes; ILid++) {
 			#pragma HLS unroll
-			if (resend[ILid]) {
+			if (resend[ILid][ARBITER_LATENCY-1]) {
 				valid[ILid] = 1;
-				payload[ILid] = payload_resend[ILid];
+				payload[ILid] = payload_resend[ILid][ARBITER_LATENCY-1];
 			} else if (fetch_complete[ILid]) {
 				valid[ILid] = 0;
 				payload[ILid] = END_COO;
@@ -553,6 +557,14 @@ void shuffle_core(COO_STREAM_T input_lanes[2], COO_STREAM_T output_lanes[2], uns
 		// ------- end of F stage
 
 		// Arbiter stage (A) pipeline arbiter, depth = 6
+		for (int j = 0; j < num_lanes; ++j) {
+		#pragma HLS unroll
+			for (int i = ARBITER_LATENCY-1; i > 0; --i) {
+			#pragma HLS unroll
+				resend[j][i] = resend[j][i - 1];
+				payload_resend[j][i] = payload_resend[j][i - 1];
+			}
+		}
 		rotate_priority = next_rotate_priority;
 		arbiter_1p(
 			payload,
