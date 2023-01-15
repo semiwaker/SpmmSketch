@@ -266,12 +266,13 @@ inline unsigned own_hash(const unsigned row, const unsigned col, const int m=0) 
 
 //	void apply(COO_STREAM_T &dest, const int level, const int id) {
 
-	void hash_table(COO_T ram[M][N], COO_STREAM_T &in, COO_STREAM_T &dest, const int level, const int id) {
+	void hash_table(COO_STREAM_T &in, COO_STREAM_T &dest, const int level, const int id) {
 #pragma HLS INLINE off
 #ifndef __SYNTHESIS__
 	printf("HashTable[%d][%d].apply()\n", level, id);
 	fflush(stdout);
 #endif
+		COO_T ram[M][N];
 		initialize(ram);
 		bool exit = 0;
 		while (!exit) {
@@ -459,8 +460,8 @@ void shuffle_core(COO_STREAM_T input_lanes[2], COO_STREAM_T output_lanes[2], uns
 	loop_shuffle_pipeline:
 	while (!loop_exit) {
 		#pragma HLS pipeline II=1
-		#pragma HLS dependence variable=resend inter RAW true distance=ARBITER_LATENCY
-		#pragma HLS dependence variable=payload_resend inter RAW true distance=ARBITER_LATENCY
+		#pragma HLS dependence variable=resend inter RAW true distance=9
+		#pragma HLS dependence variable=payload_resend inter RAW true distance=9
 #ifndef __SYNTHESIS__
 		count ++;
 #endif
@@ -614,7 +615,7 @@ void collector(COO_STREAM_T &src, COO_STREAM_T &dest, bool debug=0);
 //	COO_STREAM_T in[2], out[2];
 //	void apply(COO_STREAM_T &dest0, COO_STREAM_T &dest1, unsigned ref_bit, const int level, const int id) {
 
-	void shuffle_unit(COO_STREAM_T in[2], COO_STREAM_T out[2], COO_STREAM_T &dest0, COO_STREAM_T &dest1, unsigned ref_bit, const int level, const int id) {
+	void shuffle_unit(COO_STREAM_T in[2], COO_STREAM_T &dest0, COO_STREAM_T &dest1, unsigned ref_bit, const int level, const int id) {
 #pragma HLS INLINE
 #ifndef __SYNTHESIS__
 	printf("Shuffler[%d][%d].apply(ref_bit=%u)\n", level, id, ref_bit);
@@ -622,6 +623,8 @@ void collector(COO_STREAM_T &src, COO_STREAM_T &dest, bool debug=0);
 #endif
 
 		#pragma HLS DATAFLOW
+		COO_STREAM_T out[2];
+		#pragma HLS stream variable=out depth=D
 		shuffle_core(in, out, ref_bit);
 		collector(out[0], dest0);
 		collector(out[1], dest1);
@@ -693,15 +696,14 @@ void spgemm(MAT_PKT_T *lhs, MAT_PKT_T *rhs,
 //	Shuffler shuffles[NUM_SHUFFLE_LEVEL][NUM_SHUFFLE_PER_LEVEL];
 
 	COO_STREAM_T hash_in[NUM_HASH_LEVEL][NUM_PE]; // , hash_out[NUM_HASH_LEVEL][NUM_PE];
-	COO_T hash_ram[NUM_HASH_LEVEL][NUM_PE][M][N];
-#pragma HLS STREAM variable=hash_in depth=D
-#pragma HLS ARRAY_PARTITION variable=hash_ram dim=1 type=complete
-#pragma HLS ARRAY_PARTITION variable=hash_ram dim=2 type=complete
-#pragma HLS ARRAY_PARTITION variable=hash_ram dim=3 type=complete
+//	COO_T hash_ram[NUM_HASH_LEVEL][NUM_PE][M][N];
+ #pragma HLS STREAM variable=hash_in depth=D
+//#pragma HLS ARRAY_PARTITION variable=hash_ram dim=1 type=complete
+//#pragma HLS ARRAY_PARTITION variable=hash_ram dim=2 type=complete
+//#pragma HLS ARRAY_PARTITION variable=hash_ram dim=3 type=complete
 
-	COO_STREAM_T shuffle_in[NUM_SHUFFLE_LEVEL][NUM_SHUFFLE_PER_LEVEL][2], shuffle_out[NUM_SHUFFLE_LEVEL][NUM_SHUFFLE_PER_LEVEL][2];
+	COO_STREAM_T shuffle_in[NUM_SHUFFLE_LEVEL][NUM_SHUFFLE_PER_LEVEL][2];
 #pragma HLS STREAM variable=shuffle_in depth=D
-#pragma HLS STREAM variable=shuffle_out depth=D
 
 #pragma HLS DATAFLOW
 
@@ -720,12 +722,12 @@ void spgemm(MAT_PKT_T *lhs, MAT_PKT_T *rhs,
 			printf("hashes[%d][%d] sends to shuffles[%d][%d].in[%d]\n", i, j, i, get_shuffle(j,i), get_shuffle_channel(j,i));
 #endif
 //			hashes[i][j].apply(shuffles[i][get_shuffle(j, i)].in[get_shuffle_channel(j, i)], i, j);
-			hash_table(hash_ram[i][j], hash_in[i][j], shuffle_in[i][get_shuffle(j, i)][get_shuffle_channel(j, i)], i, j);
+			hash_table(hash_in[i][j], shuffle_in[i][get_shuffle(j, i)][get_shuffle_channel(j, i)], i, j);
 		}
 		for (int j=0; j<NUM_SHUFFLE_PER_LEVEL; j++) {
 #pragma HLS UNROLL
 //			shuffles[i][j].apply(hashes[i+1][j*2].in, hashes[i+1][j*2+1].in, HIGH_BIT-i, i, j);
-			shuffle_unit(shuffle_in[i][j], shuffle_out[i][j], hash_in[i+1][j*2], hash_in[i+1][j*2+1], HIGH_BIT-i, i, j);
+			shuffle_unit(shuffle_in[i][j], hash_in[i+1][j*2], hash_in[i+1][j*2+1], HIGH_BIT-i, i, j);
 		}
 	}
 
@@ -734,7 +736,7 @@ void spgemm(MAT_PKT_T *lhs, MAT_PKT_T *rhs,
 //	fflush(stdout);
 //#endif
 
-#define LAST_HASH(j, rstj) hash_table(hash_ram[NUM_HASH_LEVEL-1][j], hash_in[NUM_HASH_LEVEL-1][j], rstj, NUM_HASH_LEVEL-1, j);
+#define LAST_HASH(j, rstj) hash_table(hash_in[NUM_HASH_LEVEL-1][j], rstj, NUM_HASH_LEVEL-1, j);
 	LAST_HASH(0, rst0);
 	LAST_HASH(1, rst1);
 	LAST_HASH(2, rst2);
